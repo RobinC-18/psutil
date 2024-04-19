@@ -4,23 +4,23 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""
-Prints releases' timeline in RST format.
-"""
+"""Prints releases' timeline in RST format."""
 
+import shlex
 import subprocess
 
 
 entry = """\
 - {date}:
-  `{ver} <https://pypi.org/project/psutil/#files>`__ -
+  `{ver} <https://pypi.org/project/psutil/{ver}/#files>`__ -
   `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#{nodotver}>`__ -
   `diff <https://github.com/giampaolo/psutil/compare/{prevtag}...{tag}#files_bucket>`__"""  # NOQA
 
 
 def sh(cmd):
     return subprocess.check_output(
-        cmd, shell=True, universal_newlines=True).strip()
+        shlex.split(cmd), universal_newlines=True
+    ).strip()
 
 
 def get_tag_date(tag):

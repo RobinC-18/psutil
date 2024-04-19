@@ -38,7 +38,7 @@ psutil currently supports the following platforms:
 - **Sun Solaris**
 - **AIX**
 
-Supported Python versions are **2.7** and **3.4+**.
+Supported Python versions are **2.7** and **3.6+**.
 `PyPy <http://pypy.org/>`__ is also known to work.
 
 The psutil documentation you're reading is distributed as a single HTML page.
@@ -90,6 +90,8 @@ Supporters
       <a href="https://github.com/PySimpleGUI"><img height="40" width="40" title="PySimpleGUI" src="https://avatars.githubusercontent.com/u/46163555?v=4" /></a>
       <a href="https://github.com/u93"><img height="40" width="40" title="Eugenio E Breijo" src="https://avatars.githubusercontent.com/u/16807302?v=4" /></a>
       <a href="https://github.com/guilt"><img height="40" width="40" title="Karthik Kumar Viswanathan" src="https://avatars.githubusercontent.com/u/195178?v=4" /></a>
+      <a href="https://github.com/JeremyGrosser"><img height="40" width="40" title="JeremyGrosser" src="https://avatars.githubusercontent.com/u/2151?v=4" /></a>
+      <a href="https://github.com/getsentry"><img height="40" width="40" title="getsentry" src="https://avatars.githubusercontent.com/u/1396951?s=200&v=4" /></a>
     </div>
     <br />
     <sup><a href="https://github.com/sponsors/giampaolo">add your avatar</a></sup>
@@ -176,6 +178,10 @@ CPU
   utilization as a percentage for each CPU.
   First element of the list refers to first CPU, second element to second CPU
   and so on. The order of the list is consistent across calls.
+  Internally this function maintains a global map (a dict) where each key is
+  the ID of the calling thread (`threading.get_ident`_). This means it can be
+  called from different threads, at different intervals, and still return
+  meaningful and independent results.
 
     >>> import psutil
     >>> # blocking
@@ -194,6 +200,8 @@ CPU
     it will return a meaningless ``0.0`` value which you are supposed to
     ignore.
 
+  .. versionchanged:: 5.9.6 function is now thread safe.
+
 .. function:: cpu_times_percent(interval=None, percpu=False)
 
   Same as :func:`cpu_percent()` but provides utilization percentages for each
@@ -211,6 +219,8 @@ CPU
 
   .. versionchanged::
     4.1.0 two new *interrupt* and *dpc* fields are returned on Windows.
+
+  .. versionchanged:: 5.9.6 function is now thread safe.
 
 .. function:: cpu_count(logical=True)
 
@@ -268,13 +278,13 @@ CPU
 .. function:: cpu_freq(percpu=False)
 
     Return CPU frequency as a named tuple including *current*, *min* and *max*
-    frequencies expressed in Mhz.
-    On Linux *current* frequency reports the real-time value, on all other
-    platforms this usually represents the nominal "fixed" value (never changing).
-    If *percpu* is ``True`` and the system supports per-cpu frequency
-    retrieval (Linux only) a list of frequencies is returned for each CPU,
-    if not, a list with a single element is returned.
-    If *min* and *max* cannot be determined they are set to ``0.0``.
+    frequencies expressed in Mhz. On Linux *current* frequency reports the
+    real-time value, on all other platforms this usually represents the
+    nominal "fixed" value (never changing). If *percpu* is ``True`` and the
+    system supports per-cpu frequency retrieval (Linux and FreeBSD), a list of
+    frequencies is returned for each CPU, if not, a list with a single element
+    is returned. If *min* and *max* cannot be determined they are set to
+    ``0.0``.
 
     Example (Linux):
 
@@ -289,7 +299,8 @@ CPU
         scpufreq(current=1703.609, min=800.0, max=3500.0),
         scpufreq(current=1754.289, min=800.0, max=3500.0)]
 
-    Availability: Linux, macOS, Windows, FreeBSD, OpenBSD
+    Availability: Linux, macOS, Windows, FreeBSD, OpenBSD. *percpu* only
+    supported on Linux and FreeBSD.
 
     .. versionadded:: 5.1.0
 
@@ -333,14 +344,17 @@ Memory
 .. function:: virtual_memory()
 
   Return statistics about system memory usage as a named tuple including the
-  following fields, expressed in bytes. Main metrics:
+  following fields, expressed in bytes.
+
+  Main metrics:
 
   - **total**: total physical memory (exclusive swap).
   - **available**: the memory that can be given instantly to processes without
     the system going into swap.
-    This is calculated by summing different memory values depending on the
-    platform and it is supposed to be used to monitor actual memory usage in a
-    cross platform fashion.
+    This is calculated by summing different memory metrics that vary depending
+    on the platform. It is supposed to be used to monitor actual memory usage
+    in a cross platform fashion.
+  - **percent**: the percentage usage calculated as ``(total - available) / total * 100``.
 
   Other metrics:
 
@@ -368,7 +382,8 @@ Memory
   human readable form.
 
   .. note:: if you just want to know how much physical memory is left in a
-    cross platform fashion simply rely on the **available** field.
+    cross platform fashion simply rely on **available** and **percent**
+    fields.
 
   >>> import psutil
   >>> mem = psutil.virtual_memory()
@@ -435,16 +450,15 @@ Disks
     on Windows).
   * **opts**: a comma-separated string indicating different mount options for
     the drive/partition. Platform-dependent.
-  * **maxfile**: the maximum length a file name can have.
-  * **maxpath**: the maximum length a path name (directory name + base file
-    name) can have.
 
   >>> import psutil
   >>> psutil.disk_partitions()
-  [sdiskpart(device='/dev/sda3', mountpoint='/', fstype='ext4', opts='rw,errors=remount-ro', maxfile=255, maxpath=4096),
-   sdiskpart(device='/dev/sda7', mountpoint='/home', fstype='ext4', opts='rw', maxfile=255, maxpath=4096)]
+  [sdiskpart(device='/dev/sda3', mountpoint='/', fstype='ext4', opts='rw,errors=remount-ro'),
+   sdiskpart(device='/dev/sda7', mountpoint='/home', fstype='ext4', opts='rw')]
 
   .. versionchanged:: 5.7.4 added *maxfile* and *maxpath* fields
+
+  .. versionchanged:: 6.0.0 removed *maxfile* and *maxpath* fields
 
 .. function:: disk_usage(path)
 
@@ -505,7 +519,7 @@ Disks
   numbers will always be increasing or remain the same, but never decrease.
   ``disk_io_counters.cache_clear()`` can be used to invalidate the *nowrap*
   cache.
-  On Windows it may be ncessary to issue ``diskperf -y`` command from cmd.exe
+  On Windows it may be necessary to issue ``diskperf -y`` command from cmd.exe
   first in order to enable IO counters.
   On diskless machines this function will return ``None`` or ``{}`` if
   *perdisk* is ``True``.
@@ -638,7 +652,7 @@ Network
    +----------------+-----------------------------------------------------+
 
   On macOS and AIX this function requires root privileges.
-  To get per-process connections use :meth:`Process.connections`.
+  To get per-process connections use :meth:`Process.net_connections`.
   Also, see `netstat.py`_ example script.
   Example:
 
@@ -658,19 +672,18 @@ Network
     (Solaris) UNIX sockets are not supported.
 
   .. note::
-     (Linux, FreeBSD) "raddr" field for UNIX sockets is always set to "".
-     This is a limitation of the OS.
-
-  .. note::
-     (OpenBSD) "laddr" and "raddr" fields for UNIX sockets are always set to
-     "". This is a limitation of the OS.
+     (Linux, FreeBSD, OpenBSD) *raddr* field for UNIX sockets is always set to
+     ``""`` (empty string). This is a limitation of the OS.
 
   .. versionadded:: 2.1.0
 
   .. versionchanged:: 5.3.0 : socket "fd" is now set for real instead of being
      ``-1``.
 
-  .. versionchanged:: 5.3.0 : "laddr" and "raddr" are named tuples.
+  .. versionchanged:: 5.3.0 : *laddr* and *raddr* are named tuples.
+
+  .. versionchanged:: 5.9.5 : OpenBSD: retrieve *laddr* path for AF_UNIX
+    sockets (before it was an empty string).
 
 .. function:: net_if_addrs()
 
@@ -914,12 +927,12 @@ Functions
 
   Return an iterator yielding a :class:`Process` class instance for all running
   processes on the local machine.
-  This should be preferred over :func:`psutil.pids()` to iterate over processes
-  as it's safe from race condition.
+  This should be preferred over :func:`psutil.pids()` to iterate over
+  processes, as retrieving info is safe from race conditions.
 
   Every :class:`Process` instance is only created once, and then cached for the
   next time :func:`psutil.process_iter()` is called (if PID is still alive).
-  Also it makes sure process PIDs are not reused.
+  Cache can optionally be cleared via ``process_iter.clear_cache()``.
 
   *attrs* and *ad_value* have the same meaning as in :meth:`Process.as_dict()`.
   If *attrs* is specified :meth:`Process.as_dict()` result will be stored as a
@@ -949,8 +962,18 @@ Functions
      3: {'name': 'ksoftirqd/0', 'username': 'root'},
      ...}
 
+  Clear internal cache::
+
+    >>> psutil.process_iter.cache_clear()
+
   .. versionchanged::
     5.3.0 added "attrs" and "ad_value" parameters.
+
+  .. versionchanged::
+    6.0.0 no longer checks whether each yielded process PID has been reused.
+
+  .. versionchanged::
+    6.0.0 added ``psutil.process_iter.cache_clear()`` API.
 
 .. function:: pid_exists(pid)
 
@@ -1057,28 +1080,25 @@ Process class
 
   .. note::
 
-    the way this class is bound to a process is uniquely via its **PID**.
+    the way this class is bound to a process is via its **PID**.
     That means that if the process terminates and the OS reuses its PID you may
-    end up interacting with another process.
-    The only exceptions for which process identity is preemptively checked
-    (via PID + creation time) is for the following methods:
+    inadvertently end up querying another process. To prevent this problem
+    you can use :meth:`is_running()` first.
+    The only methods which preemptively check whether PID has been reused
+    (via PID + creation time) are:
     :meth:`nice` (set),
     :meth:`ionice`  (set),
     :meth:`cpu_affinity` (set),
     :meth:`rlimit` (set),
     :meth:`children`,
+    :meth:`ppid`,
     :meth:`parent`,
     :meth:`parents`,
     :meth:`suspend`
     :meth:`resume`,
     :meth:`send_signal`,
-    :meth:`terminate`
+    :meth:`terminate` and
     :meth:`kill`.
-    To prevent this problem for all other methods you can use
-    :meth:`is_running()` before querying the process or
-    :func:`process_iter()` in case you're iterating over all processes.
-    It must be noted though that unless you deal with very "old" (inactive)
-    :class:`Process` instances this will hardly represent a problem.
 
   .. method:: oneshot()
 
@@ -1176,9 +1196,10 @@ Process class
 
   .. method:: exe()
 
-    The process executable as an absolute path.
-    On some systems this may also be an empty string.
-    The return value is cached after first call.
+    The process executable as an absolute path. On some systems, if exe cannot
+    be determined for some internal reason (e.g. system process or path no
+    longer exists), this may be an empty string. The return value is cached
+    after first call.
 
     >>> import psutil
     >>> psutil.Process().exe()
@@ -1200,7 +1221,7 @@ Process class
 
     >>> import psutil
     >>> psutil.Process().environ()
-    {'LC_NUMERIC': 'it_IT.UTF-8', 'QT_QPA_PLATFORMTHEME': 'appmenu-qt5', 'IM_CONFIG_PHASE': '1', 'XDG_GREETER_DATA_DIR': '/var/lib/lightdm-data/giampaolo', 'GNOME_DESKTOP_SESSION_ID': 'this-is-deprecated', 'XDG_CURRENT_DESKTOP': 'Unity', 'UPSTART_EVENTS': 'started starting', 'GNOME_KEYRING_PID': '', 'XDG_VTNR': '7', 'QT_IM_MODULE': 'ibus', 'LOGNAME': 'giampaolo', 'USER': 'giampaolo', 'PATH': '/home/giampaolo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/giampaolo/svn/sysconf/bin', 'LC_PAPER': 'it_IT.UTF-8', 'GNOME_KEYRING_CONTROL': '', 'GTK_IM_MODULE': 'ibus', 'DISPLAY': ':0', 'LANG': 'en_US.UTF-8', 'LESS_TERMCAP_se': '\x1b[0m', 'TERM': 'xterm-256color', 'SHELL': '/bin/bash', 'XDG_SESSION_PATH': '/org/freedesktop/DisplayManager/Session0', 'XAUTHORITY': '/home/giampaolo/.Xauthority', 'LANGUAGE': 'en_US', 'COMPIZ_CONFIG_PROFILE': 'ubuntu', 'LC_MONETARY': 'it_IT.UTF-8', 'QT_LINUX_ACCESSIBILITY_ALWAYS_ON': '1', 'LESS_TERMCAP_me': '\x1b[0m', 'LESS_TERMCAP_md': '\x1b[01;38;5;74m', 'LESS_TERMCAP_mb': '\x1b[01;31m', 'HISTSIZE': '100000', 'UPSTART_INSTANCE': '', 'CLUTTER_IM_MODULE': 'xim', 'WINDOWID': '58786407', 'EDITOR': 'vim', 'SESSIONTYPE': 'gnome-session', 'XMODIFIERS': '@im=ibus', 'GPG_AGENT_INFO': '/home/giampaolo/.gnupg/S.gpg-agent:0:1', 'HOME': '/home/giampaolo', 'HISTFILESIZE': '100000', 'QT4_IM_MODULE': 'xim', 'GTK2_MODULES': 'overlay-scrollbar', 'XDG_SESSION_DESKTOP': 'ubuntu', 'SHLVL': '1', 'XDG_RUNTIME_DIR': '/run/user/1000', 'INSTANCE': 'Unity', 'LC_ADDRESS': 'it_IT.UTF-8', 'SSH_AUTH_SOCK': '/run/user/1000/keyring/ssh', 'VTE_VERSION': '4205', 'GDMSESSION': 'ubuntu', 'MANDATORY_PATH': '/usr/share/gconf/ubuntu.mandatory.path', 'VISUAL': 'vim', 'DESKTOP_SESSION': 'ubuntu', 'QT_ACCESSIBILITY': '1', 'XDG_SEAT_PATH': '/org/freedesktop/DisplayManager/Seat0', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'LESSOPEN': '| /usr/bin/lesspipe %s', 'XDG_SESSION_ID': 'c2', 'DBUS_SESSION_BUS_ADDRESS': 'unix:abstract=/tmp/dbus-9GAJpvnt8r', '_': '/usr/bin/python', 'DEFAULTS_PATH': '/usr/share/gconf/ubuntu.default.path', 'LC_IDENTIFICATION': 'it_IT.UTF-8', 'LESS_TERMCAP_ue': '\x1b[0m', 'UPSTART_SESSION': 'unix:abstract=/com/ubuntu/upstart-session/1000/1294', 'XDG_CONFIG_DIRS': '/etc/xdg/xdg-ubuntu:/usr/share/upstart/xdg:/etc/xdg', 'GTK_MODULES': 'gail:atk-bridge:unity-gtk-module', 'XDG_SESSION_TYPE': 'x11', 'PYTHONSTARTUP': '/home/giampaolo/.pythonstart', 'LC_NAME': 'it_IT.UTF-8', 'OLDPWD': '/home/giampaolo/svn/curio_giampaolo/tests', 'GDM_LANG': 'en_US', 'LC_TELEPHONE': 'it_IT.UTF-8', 'HISTCONTROL': 'ignoredups:erasedups', 'LC_MEASUREMENT': 'it_IT.UTF-8', 'PWD': '/home/giampaolo/svn/curio_giampaolo', 'JOB': 'gnome-session', 'LESS_TERMCAP_us': '\x1b[04;38;5;146m', 'UPSTART_JOB': 'unity-settings-daemon', 'LC_TIME': 'it_IT.UTF-8', 'LESS_TERMCAP_so': '\x1b[38;5;246m', 'PAGER': 'less', 'XDG_DATA_DIRS': '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop', 'XDG_SEAT': 'seat0'}
+    {'LC_NUMERIC': 'it_IT.UTF-8', 'QT_QPA_PLATFORMTHEME': 'appmenu-qt5', 'IM_CONFIG_PHASE': '1', 'XDG_GREETER_DATA_DIR': '/var/lib/lightdm-data/giampaolo', 'XDG_CURRENT_DESKTOP': 'Unity', 'UPSTART_EVENTS': 'started starting', 'GNOME_KEYRING_PID': '', 'XDG_VTNR': '7', 'QT_IM_MODULE': 'ibus', 'LOGNAME': 'giampaolo', 'USER': 'giampaolo', 'PATH': '/home/giampaolo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/giampaolo/svn/sysconf/bin', 'LC_PAPER': 'it_IT.UTF-8', 'GNOME_KEYRING_CONTROL': '', 'GTK_IM_MODULE': 'ibus', 'DISPLAY': ':0', 'LANG': 'en_US.UTF-8', 'LESS_TERMCAP_se': '\x1b[0m', 'TERM': 'xterm-256color', 'SHELL': '/bin/bash', 'XDG_SESSION_PATH': '/org/freedesktop/DisplayManager/Session0', 'XAUTHORITY': '/home/giampaolo/.Xauthority', 'LANGUAGE': 'en_US', 'COMPIZ_CONFIG_PROFILE': 'ubuntu', 'LC_MONETARY': 'it_IT.UTF-8', 'QT_LINUX_ACCESSIBILITY_ALWAYS_ON': '1', 'LESS_TERMCAP_me': '\x1b[0m', 'LESS_TERMCAP_md': '\x1b[01;38;5;74m', 'LESS_TERMCAP_mb': '\x1b[01;31m', 'HISTSIZE': '100000', 'UPSTART_INSTANCE': '', 'CLUTTER_IM_MODULE': 'xim', 'WINDOWID': '58786407', 'EDITOR': 'vim', 'SESSIONTYPE': 'gnome-session', 'XMODIFIERS': '@im=ibus', 'GPG_AGENT_INFO': '/home/giampaolo/.gnupg/S.gpg-agent:0:1', 'HOME': '/home/giampaolo', 'HISTFILESIZE': '100000', 'QT4_IM_MODULE': 'xim', 'GTK2_MODULES': 'overlay-scrollbar', 'XDG_SESSION_DESKTOP': 'ubuntu', 'SHLVL': '1', 'XDG_RUNTIME_DIR': '/run/user/1000', 'INSTANCE': 'Unity', 'LC_ADDRESS': 'it_IT.UTF-8', 'SSH_AUTH_SOCK': '/run/user/1000/keyring/ssh', 'VTE_VERSION': '4205', 'GDMSESSION': 'ubuntu', 'MANDATORY_PATH': '/usr/share/gconf/ubuntu.mandatory.path', 'VISUAL': 'vim', 'DESKTOP_SESSION': 'ubuntu', 'QT_ACCESSIBILITY': '1', 'XDG_SEAT_PATH': '/org/freedesktop/DisplayManager/Seat0', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'LESSOPEN': '| /usr/bin/lesspipe %s', 'XDG_SESSION_ID': 'c2', 'DBUS_SESSION_BUS_ADDRESS': 'unix:abstract=/tmp/dbus-9GAJpvnt8r', '_': '/usr/bin/python', 'DEFAULTS_PATH': '/usr/share/gconf/ubuntu.default.path', 'LC_IDENTIFICATION': 'it_IT.UTF-8', 'LESS_TERMCAP_ue': '\x1b[0m', 'UPSTART_SESSION': 'unix:abstract=/com/ubuntu/upstart-session/1000/1294', 'XDG_CONFIG_DIRS': '/etc/xdg/xdg-ubuntu:/usr/share/upstart/xdg:/etc/xdg', 'GTK_MODULES': 'gail:atk-bridge:unity-gtk-module', 'XDG_SESSION_TYPE': 'x11', 'PYTHONSTARTUP': '/home/giampaolo/.pythonstart', 'LC_NAME': 'it_IT.UTF-8', 'OLDPWD': '/home/giampaolo/svn/curio_giampaolo/tests', 'GDM_LANG': 'en_US', 'LC_TELEPHONE': 'it_IT.UTF-8', 'HISTCONTROL': 'ignoredups:erasedups', 'LC_MEASUREMENT': 'it_IT.UTF-8', 'PWD': '/home/giampaolo/svn/curio_giampaolo', 'JOB': 'gnome-session', 'LESS_TERMCAP_us': '\x1b[04;38;5;146m', 'UPSTART_JOB': 'unity-settings-daemon', 'LC_TIME': 'it_IT.UTF-8', 'LESS_TERMCAP_so': '\x1b[38;5;246m', 'PAGER': 'less', 'XDG_DATA_DIRS': '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop', 'XDG_SEAT': 'seat0'}
 
     .. note::
       on macOS Big Sur this function returns something meaningful only for the
@@ -1230,7 +1251,7 @@ Process class
     If *attrs* is specified it must be a list of strings reflecting available
     :class:`Process` class's attribute names. Here's a list of possible string
     values:
-    ``'cmdline'``, ``'connections'``, ``'cpu_affinity'``, ``'cpu_num'``, ``'cpu_percent'``, ``'cpu_times'``, ``'create_time'``, ``'cwd'``, ``'environ'``, ``'exe'``, ``'gids'``, ``'io_counters'``, ``'ionice'``, ``'memory_full_info'``, ``'memory_info'``, ``'memory_maps'``, ``'memory_percent'``, ``'name'``, ``'nice'``, ``'num_ctx_switches'``, ``'num_fds'``, ``'num_handles'``, ``'num_threads'``, ``'open_files'``, ``'pid'``, ``'ppid'``, ``'status'``, ``'terminal'``, ``'threads'``, ``'uids'``, ``'username'```.
+    ``'cmdline'``, ``'net_connections'``, ``'cpu_affinity'``, ``'cpu_num'``, ``'cpu_percent'``, ``'cpu_times'``, ``'create_time'``, ``'cwd'``, ``'environ'``, ``'exe'``, ``'gids'``, ``'io_counters'``, ``'ionice'``, ``'memory_full_info'``, ``'memory_info'``, ``'memory_maps'``, ``'memory_percent'``, ``'name'``, ``'nice'``, ``'num_ctx_switches'``, ``'num_fds'``, ``'num_handles'``, ``'num_threads'``, ``'open_files'``, ``'pid'``, ``'ppid'``, ``'status'``, ``'terminal'``, ``'threads'``, ``'uids'``, ``'username'```.
     If *attrs* argument is not passed all public read only attributes are
     assumed.
     *ad_value* is the value which gets assigned to a dict key in case
@@ -1246,7 +1267,7 @@ Process class
       >>>
       >>> # get a list of valid attrs names
       >>> list(psutil.Process().as_dict().keys())
-      ['status', 'cpu_num', 'num_ctx_switches', 'pid', 'memory_full_info', 'connections', 'cmdline', 'create_time', 'ionice', 'num_fds', 'memory_maps', 'cpu_percent', 'terminal', 'ppid', 'cwd', 'nice', 'username', 'cpu_times', 'io_counters', 'memory_info', 'threads', 'open_files', 'name', 'num_threads', 'exe', 'uids', 'gids', 'cpu_affinity', 'memory_percent', 'environ']
+      ['cmdline', 'connections', 'cpu_affinity', 'cpu_num', 'cpu_percent', 'cpu_times', 'create_time', 'cwd', 'environ', 'exe', 'gids', 'io_counters', 'ionice', 'memory_full_info', 'memory_info', 'memory_maps', 'memory_percent', 'name', 'net_connections', 'nice', 'num_ctx_switches', 'num_fds', 'num_threads', 'open_files', 'pid', 'ppid', 'status', 'terminal', 'threads', 'uids', 'username']
 
     .. versionchanged::
       3.0.0 *ad_value* is used also when incurring into
@@ -1277,7 +1298,9 @@ Process class
 
   .. method:: cwd()
 
-    The process current working directory as an absolute path.
+    The process current working directory as an absolute path. If cwd cannot be
+    determined for some internal reason (e.g. system process or directory no
+    longer exists) it may return an empty string.
 
     .. versionchanged:: 5.6.4 added support for NetBSD
 
@@ -1751,7 +1774,7 @@ Process class
     fields are variable depending on the platform.
     This method is useful to obtain a detailed representation of process
     memory usage as explained
-    `here <http://bmaurer.blogspot.it/2006/03/memory-usage-with-smaps.html>`__
+    `here <https://web.archive.org/web/20180907232758/http://bmaurer.blogspot.com/2006/03/memory-usage-with-smaps.html>`__
     (the most important value is "private" memory).
     If *grouped* is ``True`` the mapped regions with the same *path* are
     grouped together and the different memory fields are summed.  If *grouped*
@@ -1873,15 +1896,16 @@ Process class
     .. versionchanged::
       4.1.0 new *position*, *mode* and *flags* fields on Linux.
 
-  .. method:: connections(kind="inet")
+  .. method:: net_connections(kind="inet")
 
     Return socket connections opened by process as a list of named tuples.
     To get system-wide connections use :func:`psutil.net_connections()`.
     Every named tuple provides 6 attributes:
 
-    - **fd**: the socket file descriptor. This can be passed to `socket.fromfd`_
-      to obtain a usable socket object. On Windows, FreeBSD and SunOS this is
-      always set to ``-1``.
+    - **fd**: the socket file descriptor. If the connection refers to the
+      current process this may be passed to `socket.fromfd`_ to obtain a usable
+      socket object.
+      On Windows, FreeBSD and SunOS this is always set to ``-1``.
     - **family**: the address family, either `AF_INET`_, `AF_INET6`_ or
       `AF_UNIX`_.
     - **type**: the address type, either `SOCK_STREAM`_, `SOCK_DGRAM`_ or
@@ -1932,7 +1956,7 @@ Process class
       >>> p = psutil.Process(1694)
       >>> p.name()
       'firefox'
-      >>> p.connections()
+      >>> p.net_connections()
       [pconn(fd=115, family=<AddressFamily.AF_INET: 2>, type=<SocketType.SOCK_STREAM: 1>, laddr=addr(ip='10.0.0.1', port=48776), raddr=addr(ip='93.186.135.91', port=80), status='ESTABLISHED'),
        pconn(fd=117, family=<AddressFamily.AF_INET: 2>, type=<SocketType.SOCK_STREAM: 1>, laddr=addr(ip='10.0.0.1', port=43761), raddr=addr(ip='72.14.234.100', port=80), status='CLOSING'),
        pconn(fd=119, family=<AddressFamily.AF_INET: 2>, type=<SocketType.SOCK_STREAM: 1>, laddr=addr(ip='10.0.0.1', port=60759), raddr=addr(ip='72.14.234.104', port=80), status='ESTABLISHED'),
@@ -1942,18 +1966,28 @@ Process class
       (Solaris) UNIX sockets are not supported.
 
     .. note::
-       (Linux, FreeBSD) "raddr" field for UNIX sockets is always set to "".
+       (Linux, FreeBSD) *raddr* field for UNIX sockets is always set to "".
        This is a limitation of the OS.
 
     .. note::
-       (OpenBSD) "laddr" and "raddr" fields for UNIX sockets are always set to
+       (OpenBSD) *laddr* and *raddr* fields for UNIX sockets are always set to
        "". This is a limitation of the OS.
 
     .. note::
       (AIX) :class:`psutil.AccessDenied` is always raised unless running
       as root (lsof does the same).
 
-    .. versionchanged:: 5.3.0 : "laddr" and "raddr" are named tuples.
+    .. versionchanged:: 5.3.0 : *laddr* and *raddr* are named tuples.
+
+    .. versionchanged:: 6.0.0 : method renamed from `connections` to
+      `net_connections`.
+
+  .. method:: connections()
+
+    Same as :meth:`net_connections` (deprecated).
+
+    .. warning::
+      deprecated in version 6.0.0; use :meth:`net_connections` instead.
 
   .. method:: is_running()
 
@@ -1961,10 +1995,16 @@ Process class
     This is reliable also in case the process is gone and its PID reused by
     another process, therefore it must be preferred over doing
     ``psutil.pid_exists(p.pid)``.
+    If PID has been reused this method will also remove the process from
+    :func:`process_iter()` internal cache.
 
     .. note::
       this will return ``True`` also if the process is a zombie
       (``p.status() == psutil.STATUS_ZOMBIE``).
+
+    .. versionchanged:: 6.0.0 : automatically remove process from
+      :func:`process_iter()` internal cache if PID has been reused by another
+      process.
 
   .. method:: send_signal(signal)
 
@@ -2357,7 +2397,7 @@ Connections constants
 .. data:: CONN_BOUND (Solaris)
 
   A set of strings representing the status of a TCP connection.
-  Returned by :meth:`psutil.Process.connections()` and
+  Returned by :meth:`psutil.Process.net_connections()` and
   :func:`psutil.net_connections` (`status` field).
 
 Hardware constants
@@ -2537,7 +2577,7 @@ Bytes conversion
       for i, s in enumerate(symbols):
           prefix[s] = 1 << (i + 1) * 10
       for s in reversed(symbols):
-          if n >= prefix[s]:
+          if abs(n) >= prefix[s]:
               value = float(n) / prefix[s]
               return '%.1f%s' % (value, s)
       return "%sB" % n
@@ -2565,7 +2605,7 @@ FAQs
   the Python script as a Windows service (ProcessHacker does this).
 
 * Q: is MinGW supported on Windows?
-* A: no, you should Visual Studio (see `development guide`_).
+* A: no, you should Visual Studio (see `development guide <https://github.com/giampaolo/psutil/blob/master/docs/DEVGUIDE.rst>`_).
 
 Running tests
 =============
@@ -2595,7 +2635,7 @@ On Windows:
 ::
 
   set PSUTIL_DEBUG=1 python.exe script.py
-  psutil-debug [psutil/arch/windows/process_info.c:90]> NtWow64ReadVirtualMemory64(pbi64.PebBaseAddress) -> 998 (Unknown error) (ignored)
+  psutil-debug [psutil/arch/windows/proc.c:90]> NtWow64ReadVirtualMemory64(pbi64.PebBaseAddress) -> 998 (Unknown error) (ignored)
 
 
 Security
@@ -2607,29 +2647,55 @@ contact`_.  Tidelift will coordinate the fix and disclosure.
 Development guide
 =================
 
-If you want to develop psutil take a look at the `development guide`_.
+If you want to develop psutil take a look at the `DEVGUIDE.rst`_.
 
 Platforms support history
 =========================
 
-* psutil 5.9.1 (2022-05): drop Python 2.6 support
-* psutil 5.9.0 (2021-12): **MidnightBSD**
-* psutil 5.8.0 (2020-12): **PyPy 2** on Windows
-* psutil 5.7.1 (2020-07): **Windows Nano**
-* psutil 5.7.0 (2020-02): drop Windows XP & Server 2003 support
-* psutil 5.7.0 (2020-02): **PyPy 3** on Windows
-* psutil 5.4.0 (2017-11): **AIX**
-* psutil 3.4.1 (2016-01): **NetBSD**
-* psutil 3.3.0 (2015-11): **OpenBSD**
-* psutil 1.0.0 (2013-07): **Solaris**
-* psutil 0.1.1 (2009-03): **FreeBSD**
-* psutil 0.1.0 (2009-01): **Linux, Windows, macOS**
+* psutil 5.9.6 (2023-10): drop Python 3.4 and 3.5
+* psutil 5.9.1 (2022-05): drop Python 2.6
+* psutil 5.9.0 (2021-12): add **MidnightBSD**
+* psutil 5.8.0 (2020-12): add **PyPy 2** on Windows
+* psutil 5.7.1 (2020-07): add **Windows Nano**
+* psutil 5.7.0 (2020-02): drop Windows XP & Windows Server 2003
+* psutil 5.7.0 (2020-02): add **PyPy 3** on Windows
+* psutil 5.4.0 (2017-11): add **AIX**
+* psutil 3.4.1 (2016-01): add **NetBSD**
+* psutil 3.3.0 (2015-11): add **OpenBSD**
+* psutil 1.0.0 (2013-07): add **Solaris**
+* psutil 0.1.1 (2009-03): add **FreeBSD**
+* psutil 0.1.0 (2009-01): add **Linux, Windows, macOS**
 
-Supported Python versions are 2.7, 3.4+ and PyPy3.
+Supported Python versions at the time of writing are cPython 2.7, 3.6+ and
+PyPy3.
 
 Timeline
 ========
 
+- 2024-01-19:
+  `5.9.8 <https://pypi.org/project/psutil/5.9.8/#files>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#598>`__ -
+  `diff <https://github.com/giampaolo/psutil/compare/release-5.9.7...release-5.9.8#files_bucket>`__
+- 2023-12-17:
+  `5.9.7 <https://pypi.org/project/psutil/5.9.7/#files>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#597>`__ -
+  `diff <https://github.com/giampaolo/psutil/compare/release-5.9.6...release-5.9.7#files_bucket>`__
+- 2023-10-15:
+  `5.9.6 <https://pypi.org/project/psutil/5.9.6/#files>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#596>`__ -
+  `diff <https://github.com/giampaolo/psutil/compare/release-5.9.5...release-5.9.6#files_bucket>`__
+- 2023-04-17:
+  `5.9.5 <https://pypi.org/project/psutil/5.9.5/#files>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#595>`__ -
+  `diff <https://github.com/giampaolo/psutil/compare/release-5.9.4...release-5.9.5#files_bucket>`__
+- 2022-11-07:
+  `5.9.4 <https://pypi.org/project/psutil/5.9.4/#files>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#594>`__ -
+  `diff <https://github.com/giampaolo/psutil/compare/release-5.9.3...release-5.9.4#files_bucket>`__
+- 2022-10-18:
+  `5.9.3 <https://pypi.org/project/psutil/5.9.3/#files>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#593>`__ -
+  `diff <https://github.com/giampaolo/psutil/compare/release-5.9.2...release-5.9.3#files_bucket>`__
 - 2022-09-04:
   `5.9.2 <https://pypi.org/project/psutil/5.9.2/#files>`__ -
   `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#592>`__ -
@@ -2646,7 +2712,7 @@ Timeline
   `5.8.0 <https://pypi.org/project/psutil/5.8.0/#files>`__ -
   `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#580>`__ -
   `diff <https://github.com/giampaolo/psutil/compare/release-5.7.3...release-5.8.0#files_bucket>`__
-- 2020-10-23:
+- 2020-10-24:
   `5.7.3 <https://pypi.org/project/psutil/5.7.3/#files>`__ -
   `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#573>`__ -
   `diff <https://github.com/giampaolo/psutil/compare/release-5.7.2...release-5.7.3#files_bucket>`__
@@ -2714,7 +2780,7 @@ Timeline
   `5.4.6 <https://pypi.org/project/psutil/5.4.6/#files>`__ -
   `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#546>`__ -
   `diff <https://github.com/giampaolo/psutil/compare/release-5.4.5...release-5.4.6#files_bucket>`__
-- 2018-04-14:
+- 2018-04-13:
   `5.4.5 <https://pypi.org/project/psutil/5.4.5/#files>`__ -
   `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#545>`__ -
   `diff <https://github.com/giampaolo/psutil/compare/release-5.4.4...release-5.4.5#files_bucket>`__
@@ -2740,7 +2806,7 @@ Timeline
   `diff <https://github.com/giampaolo/psutil/compare/release-5.3.1...release-5.4.0#files_bucket>`__
 - 2017-09-10:
   `5.3.1 <https://pypi.org/project/psutil/5.3.1/#files>`__ -
-  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#530>`__ -
+  `what's new <https://github.com/giampaolo/psutil/blob/master/HISTORY.rst#531>`__ -
   `diff <https://github.com/giampaolo/psutil/compare/release-5.3.0...release-5.3.1#files_bucket>`__
 - 2017-09-01:
   `5.3.0 <https://pypi.org/project/psutil/5.3.0/#files>`__ -
@@ -2981,7 +3047,7 @@ Timeline
 .. _`BPO-6973`: https://bugs.python.org/issue6973
 .. _`CPU affinity`: https://www.linuxjournal.com/article/6799?page=0,0
 .. _`cpu_distribution.py`: https://github.com/giampaolo/psutil/blob/master/scripts/cpu_distribution.py
-.. _`development guide`: https://github.com/giampaolo/psutil/blob/master/docs/DEVGUIDE.rst
+.. _`DEVGUIDE.rst`: https://github.com/giampaolo/psutil/blob/master/docs/DEVGUIDE.rst
 .. _`disk_usage.py`: https://github.com/giampaolo/psutil/blob/master/scripts/disk_usage.py
 .. _`enum`: https://docs.python.org/3/library/enum.html#module-enum
 .. _`fans.py`: https://github.com/giampaolo/psutil/blob/master/scripts/fans.py
@@ -3004,7 +3070,7 @@ Timeline
 .. _`nettop.py`: https://github.com/giampaolo/psutil/blob/master/scripts/nettop.py
 .. _`open`: https://docs.python.org/3/library/functions.html#open
 .. _`os.cpu_count`: https://docs.python.org/3/library/os.html#os.cpu_count
-.. _`os.getloadavg`: https://docs.python.org/3/library/os.html#os.getloadavg
+.. _`os.getloadavg`: https://docs.python.org//library/os.html#os.getloadavg
 .. _`os.getpid`: https://docs.python.org/3/library/os.html#os.getpid
 .. _`os.getpriority`: https://docs.python.org/3/library/os.html#os.getpriority
 .. _`os.getresgid`: https://docs.python.org//library/os.html#os.getresgid
@@ -3033,6 +3099,6 @@ Timeline
 .. _`subprocess.Popen`: https://docs.python.org/3/library/subprocess.html#subprocess.Popen
 .. _`temperatures.py`: https://github.com/giampaolo/psutil/blob/master/scripts/temperatures.py
 .. _`TerminateProcess`: https://docs.microsoft.com/en-us/windows/desktop/api/processthreadsapi/nf-processthreadsapi-terminateprocess
+.. _`threading.get_ident`: https://docs.python.org/3/library/threading.html#threading.get_ident
 .. _`threading.Thread`: https://docs.python.org/3/library/threading.html#threading.Thread
-.. _Tidelift security contact: https://tidelift.com/security
-.. _Tidelift Subscription: https://tidelift.com/subscription/pkg/pypi-psutil?utm_source=pypi-psutil&utm_medium=referral&utm_campaign=readme
+.. _`Tidelift security contact`: https://tidelift.com/security

@@ -51,6 +51,7 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <math.h> // fabs()
+#include <unistd.h>
 
 #include "_psutil_common.h"
 #include "_psutil_posix.h"
@@ -129,7 +130,7 @@ psutil_proc_basic_info(PyObject *self, PyObject *args) {
  */
 static int
 cstrings_array_to_string(char **joined, char ** array, size_t count, char dm) {
-    int i;
+    size_t i;
     size_t total_length = 0;
     size_t item_length = 0;
     char *result = NULL;
@@ -353,7 +354,7 @@ psutil_proc_cpu_times(PyObject *self, PyObject *args) {
  */
 static PyObject *
 psutil_proc_cpu_num(PyObject *self, PyObject *args) {
-    int fd = NULL;
+    int fd = -1;
     int pid;
     char path[1000];
     struct prheader header;
@@ -647,11 +648,11 @@ psutil_users(PyObject *self, PyObject *args) {
         if (! py_hostname)
             goto error;
         py_tuple = Py_BuildValue(
-            "(OOOfOi)",
+            "(OOOdOi)",
             py_username,              // username
             py_tty,                   // tty
             py_hostname,              // hostname
-            (float)ut->ut_tv.tv_sec,  // tstamp
+            (double)ut->ut_tv.tv_sec,  // tstamp
             py_user_proc,             // (bool) user process
             ut->ut_pid                // process id
         );
@@ -1659,6 +1660,7 @@ PsutilMethods[] = {
     {"users", psutil_users, METH_VARARGS},
 
     // --- others
+    {"check_pid_range", psutil_check_pid_range, METH_VARARGS},
     {"set_debug", psutil_set_debug, METH_VARARGS},
 
     {NULL, NULL, 0, NULL}
