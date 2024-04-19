@@ -44,6 +44,8 @@ PyObject *
 psutil_disk_usage(PyObject *self, PyObject *args) {
     BOOL retval;
     ULARGE_INTEGER _, total, free;
+
+#if PY_MAJOR_VERSION <= 2
     char *path;
 
     if (PyArg_ParseTuple(args, "u", &path)) {
@@ -55,7 +57,6 @@ psutil_disk_usage(PyObject *self, PyObject *args) {
 
     // on Python 2 we also want to accept plain strings other
     // than Unicode
-#if PY_MAJOR_VERSION <= 2
     PyErr_Clear();  // drop the argument parsing error
     if (PyArg_ParseTuple(args, "s", &path)) {
         Py_BEGIN_ALLOW_THREADS
@@ -63,15 +64,35 @@ psutil_disk_usage(PyObject *self, PyObject *args) {
         Py_END_ALLOW_THREADS
         goto return_;
     }
-#endif
 
     return NULL;
 
 return_:
     if (retval == 0)
         return PyErr_SetFromWindowsErrWithFilename(0, path);
-    else
-        return Py_BuildValue("(LL)", total.QuadPart, free.QuadPart);
+#else
+    PyObject *py_path;
+    wchar_t *path;
+
+    if (!PyArg_ParseTuple(args, "U", &py_path)) {
+        return NULL;
+    }
+
+    path = PyUnicode_AsWideCharString(py_path, NULL);
+    if (path == NULL) {
+        return NULL;
+    }
+
+    Py_BEGIN_ALLOW_THREADS
+    retval = GetDiskFreeSpaceExW(path, &_, &total, &free);
+    Py_END_ALLOW_THREADS
+
+    PyMem_Free(path);
+
+    if (retval == 0)
+        return PyErr_SetExcFromWindowsErrWithFilenameObject(PyExc_OSError, 0, py_path);
+#endif
+    return Py_BuildValue("(LL)", total.QuadPart, free.QuadPart);
 }
 
 
@@ -297,13 +318,11 @@ psutil_disk_partitions(PyObject *self, PyObject *args) {
                         strcat_s(mp_path, _countof(mp_path), mp_buf);
 
                         py_tuple = Py_BuildValue(
-                            "(ssssIi)",
+                            "(ssss)",
                             drive_letter,
                             mp_path,
                             fs_type,                   // typically "NTFS"
-                            opts,
-                            lpMaximumComponentLength,  // max file length
-                            MAX_PATH                   // max path length
+                            opts
                         );
 
                         if (!py_tuple ||
@@ -329,13 +348,11 @@ psutil_disk_partitions(PyObject *self, PyObject *args) {
         strcat_s(opts, _countof(opts), psutil_get_drive_type(type));
 
         py_tuple = Py_BuildValue(
-            "(ssssIi)",
+            "(ssss)",
             drive_letter,
             drive_letter,
             fs_type,  // either FAT, FAT32, NTFS, HPFS, CDFS, UDF or NWFS
-            opts,
-            lpMaximumComponentLength,  // max file length
-            MAX_PATH                   // max path length
+            opts
         );
         if (!py_tuple)
             goto error;
